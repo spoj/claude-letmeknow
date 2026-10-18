@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 const TOOL = 'mcp__letmeknow__letmeknow'
-const NPX = ['npx', '-y', '@letmeknow/cli@0.20']
+const NPX = ['npx', '-y', '@letmeknow/cli@0.21']
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 
 // Stubs what the mod calls, with a `listen` whose output the test writes.
