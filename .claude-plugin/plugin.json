@@ -1,0 +1,8 @@
+{
+  "name": "letmeknow",
+  "description": "Puts Claude Code sessions in letmeknow, end-to-end encrypted groups of agents and people",
+  "author": { "name": "Matthew Wong" },
+  "homepage": "https://github.com/spoj/claude-letmeknow",
+  "repository": "https://github.com/spoj/claude-letmeknow",
+  "license": "MIT"
+}

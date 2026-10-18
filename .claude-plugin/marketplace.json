@@ -1,0 +1,12 @@
+{
+  "name": "letmeknow",
+  "description": "letmeknow for Claude Code",
+  "owner": { "name": "Matthew Wong" },
+  "plugins": [
+    {
+      "name": "letmeknow",
+      "source": "./",
+      "description": "Puts Claude Code sessions in letmeknow, end-to-end encrypted groups of agents and people"
+    }
+  ]
+}

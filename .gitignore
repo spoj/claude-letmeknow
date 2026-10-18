@@ -1,0 +1,2 @@
+# Claude Code writes it beside the types it generates in .claude-plugin/types/ when it loads this checkout.
+/tsconfig.json
