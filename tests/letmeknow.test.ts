@@ -5,7 +5,7 @@ const NPX = ['npx', '-y', '@letmeknow/cli@0.23']
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 
 // Stubs what the mod calls, with a `listen` whose output the test writes.
-function host(on: any, { groups = [] as unknown[], fail = undefined as string | undefined } = {}) {
+function host(on: any, { fail = undefined as string | undefined } = {}) {
   const h = {
     spawns: [] as string[][],
     tools: [] as any[],
@@ -40,7 +40,7 @@ function host(on: any, { groups = [] as unknown[], fail = undefined as string | 
   on('process.run', ($: any, e: any) => {
     h.runs.push({ argv: e.argv, stdin: e.init?.stdin })
     if (e.argv.at(-1) === 'unreachable') return { deny: 'process.run(npx) failed to start: ENOENT' }
-    const stdout = e.argv.at(-1) === 'sessions' ? JSON.stringify({ sessions: [{ handle: h.spawns[0][4], groups }] }) : `ran ${e.argv.join(' ')}`
+    const stdout = `ran ${e.argv.join(' ')}`
     const failed = e.argv.includes('broken')
     return { value: { exitCode: failed ? 2 : 0, stdout: failed ? '' : stdout, stderr: failed ? 'error: no such group\n' : '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -92,10 +92,9 @@ test('a session that draws nowhere at its start joins when the Desktop app, VS C
   expect(h.tools.length).toBe(1)
 })
 
-test('/clear and /resume keep the session; ending removes one in no group', async ($, on) => {
+test('/clear and /resume keep the session; ending stops it', async ($, on) => {
   const h = host(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  const handle = h.spawns[0][4]
   h.write('{"type":"ready","bin":"/cache/letmeknow"}\n')
   await settle()
   await end($, 'clear')
@@ -105,18 +104,8 @@ test('/clear and /resume keep the session; ending removes one in no group', asyn
   await end($, 'prompt_input_exit')
   await settle()
   expect(h.closed).toBe(true)
-  expect(h.runs.map(run => run.argv)).toEqual([['/cache/letmeknow', 'sessions'], ['/cache/letmeknow', 'sessions', 'remove', handle]])
+  expect(h.runs).toEqual([])
   expect(h.logs).toEqual([])
-})
-
-test('ending keeps a session that is in groups', async ($, on) => {
-  const h = host(on, { groups: ['a group'] })
-  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
-  h.write('{"type":"ready","bin":"/cache/letmeknow"}\n')
-  await settle()
-  await end($, 'other')
-  expect(h.closed).toBe(true)
-  expect(h.runs.map(run => run.argv)).toEqual([['/cache/letmeknow', 'sessions']])
 })
 
 test('a listen that stops is told in the transcript', async ($, on) => {

@@ -68,7 +68,7 @@ export function register(on) {
 	})
 	// As the skill says, commands run through npx until the session is ready, then with the program its `ready` names.
 	on('tool.call', { tool: TOOL }, async ($, e) => {
-		// The longest run allowed: `join` waits for its inviter, and `sessions remove` for the other members.
+		// The longest run allowed: `join` waits for its inviter.
 		const { exitCode, stdout, stderr } = await $.process.run(
 			[...(session.bin ? [session.bin] : NPX), '--session', session.handle, ...e.args],
 			{ stdin: e.input ?? '', timeoutMs: 600_000 },
@@ -76,16 +76,11 @@ export function register(on) {
 		return exitCode === 0 ? { result: stdout } : { deny: stderr.trim() || `letmeknow exited with ${exitCode}` }
 	}).catch(($, e, next) => ({ deny: next.error.message }))
 	// After /clear or /resume the process goes on without a new session.start, and so does its letmeknow session.
-	on('session.end', async ($, e, next) => {
+	// letmeknow deletes one that stops in no group.
+	on('session.end', ($, e, next) => {
 		if (!session || e.reason === 'clear' || e.reason === 'resume') return next(e)
-		const { handle, listen, bin } = session
+		session.listen.return()
 		session = undefined
-		listen.return()
-		// One whose letmeknow never got ready has nothing to remove.
-		if (bin) {
-			const { sessions } = JSON.parse((await $.process.run([bin, 'sessions'])).stdout)
-			if (sessions.some(s => s.handle === handle && !s.groups.length)) await $.process.run([bin, 'sessions', 'remove', handle])
-		}
 		return next(e)
 	})
 }
