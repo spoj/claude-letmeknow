@@ -8,6 +8,7 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 function host(on: any, { fail = undefined as string | undefined } = {}) {
   const h = {
     spawns: [] as string[][],
+    envAtSpawn: [] as [string, unknown][],
     tools: [] as any[],
     env: [] as [string, unknown][],
     status: [] as unknown[],
@@ -28,6 +29,7 @@ function host(on: any, { fail = undefined as string | undefined } = {}) {
   on('prompt.submit', ($: any, e: any) => { h.submits.push(e.text); return { text: e.text } })
   on('process.spawn', async function* ($: any, e: any, next: any) {
     h.spawns.push(e.argv)
+    h.envAtSpawn = [...h.env]
     if (fail) return { deny: fail }
     next.signal.addEventListener('abort', () => { h.closed = true; h.wake() })
     for (;;) {
@@ -57,7 +59,8 @@ test('a terminal session joins letmeknow, hears what listen prints, and runs com
   const h = host(on)
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   expect(h.spawns).toEqual([[...NPX, 'listen']])
-  expect(h.env).toEqual([])
+  // `listen` inherits the process's environment: a LETMEKNOW_SESSION it started with, as a Pi's, would name its session.
+  expect(h.envAtSpawn).toEqual([['LETMEKNOW_SESSION', undefined]])
   expect(h.tools[0].name).toBe('letmeknow')
   expect(h.tools[0].description).toContain('a session of your own')
   expect(h.tools[0].isDeferred).toBe(false)
@@ -70,7 +73,7 @@ test('a terminal session joins letmeknow, hears what listen prints, and runs com
   await settle()
   expect(h.submits).toEqual([])
   expect(h.status).toEqual(['0123456789abcdef'])
-  expect(h.env).toEqual([['LETMEKNOW_SESSION', '0123456789abcdef']])
+  expect(h.env).toEqual([['LETMEKNOW_SESSION', undefined], ['LETMEKNOW_SESSION', '0123456789abcdef']])
   h.write('i"}\n')
   h.write('{"type":"joined","member":"ann"}\n{"type":"message","content":"two"}\n')
   await settle()

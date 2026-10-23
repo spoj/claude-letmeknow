@@ -26,6 +26,9 @@ async function start($) {
 		},
 		isDeferred: false,
 	})
+	// A new session, not the one a LETMEKNOW_SESSION this process started with names, as a Pi's or another Claude Code
+	// session's: `listen` inherits the process's environment, and takes the session it names.
+	await $.env.set('LETMEKNOW_SESSION', undefined)
 	current.listen = $.process.spawn({ argv: [...NPX, 'listen'] })
 	void deliver($, current)
 }
