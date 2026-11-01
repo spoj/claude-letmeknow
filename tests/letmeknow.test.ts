@@ -7,9 +7,10 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 
 type Child = { argv: string[]; env: [string, unknown][]; closed: boolean; write(text: string, stream?: string): void; exit(code: number): void }
 
-// Stubs what the mod calls: npm lists `versions` (none: it cannot be reached), each spawn is a child whose output the
-// test writes, and `answer` answers each command run, by default with what it ran.
-function host(on: any, { versions = ['0.24.0'] as string[] | null, fail = undefined as string | undefined } = {}) {
+// Stubs what the mod calls: npm lists `versions` (none: it cannot be reached), ~/.claude/letmeknow.json holds `settings`,
+// each spawn is a child whose output the test writes, and `answer` answers each command run, by default with what it ran.
+function host(on: any, { versions = ['0.24.0'] as string[] | null, settings = undefined as object | undefined, fail = undefined as string | undefined } = {}) {
+  mock.env(on, { HOME: '/home/me' })
   const h = {
     clock: mock.clock(on),
     fetches: [] as unknown[],
@@ -28,6 +29,8 @@ function host(on: any, { versions = ['0.24.0'] as string[] | null, fail = undefi
     if (!h.versions) return { deny: 'getaddrinfo ENOTFOUND registry.npmjs.org' }
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ versions: Object.fromEntries(h.versions.map(v => [v, {}])) }) } }
   })
+  on('fs.exists', ($: any, e: any) => ({ value: settings !== undefined && e.path === '/home/me/.claude/letmeknow.json' }))
+  on('fs.read', ($: any, e: any) => ({ value: JSON.stringify(settings) }))
   on('tool.register', ($: any, e: any) => { h.tools.push(e); return { value: { tool: TOOL } } })
   on('env.set', ($: any, e: any) => { h.env.push([e.name, e.value]); return { value: {} } })
   on('ui.status', ($: any, e: any) => { h.status.push(e.text); return { value: undefined } })
@@ -124,6 +127,80 @@ test('a session that cannot look up the newest release runs one npx has', async 
   await settle()
   expect(h.logs).toEqual(['letmeknow: cannot look up the newest 0.24 release (letmeknow: $.http.fetch: getaddrinfo ENOTFOUND registry.npmjs.org); npx runs one it has'])
   expect(h.spawns).toEqual([['npx', '-y', '@letmeknow/cli@0.24', 'listen']])
+})
+
+const sessions = (...list: object[]) => ({ stdout: JSON.stringify({ sessions: list }) })
+
+test('a new session joins the listed groups it is not in, through a running sibling first, else a stopped one it runs meanwhile', async ($, on) => {
+  const h = host(on, { settings: { join: ['G1', 'G2', 'G3'] } })
+  h.answer = argv => {
+    if (argv[1] === 'sessions') return sessions({ fp: '0123456789abcdef' }, { fp: 'running', running: true, groups: ['G1'] }, { fp: 'stopped', groups: ['G1', 'G2'] })
+    if (argv[3] === 'invite') return { stdout: JSON.stringify({ link: `link-${argv[2]}-${argv[5]}` }) }
+    return { stdout: '{}' }
+  }
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await settle()
+  h.children[0].write(READY)
+  await settle()
+  expect(h.spawns.at(-1)).toEqual(['/cache/letmeknow', '--session', 'stopped', 'listen'])
+  h.children[1].write('{"type":"ready","fp":"stopped","bin":"/cache/letmeknow"}\n')
+  await settle()
+  expect(h.runs.map(run => [run.argv.slice(1).join(' '), run.timeoutMs])).toEqual([
+    ['sessions', undefined],
+    ['--session running invite --group G1', 180_000],
+    ['--session 0123456789abcdef join link-running-G1', 600_000],
+    ['--session stopped invite --group G2', 180_000],
+    ['--session 0123456789abcdef join link-stopped-G2', 600_000],
+  ])
+  expect(h.children[1].closed).toBe(true)
+  expect(h.logs).toEqual(['letmeknow: cannot join G3 through a session of this machine'])
+})
+
+test('a sibling that has no invite within 3 minutes fails, and the next is asked', async ($, on) => {
+  const h = host(on, { settings: { join: ['G1'] } })
+  h.answer = argv => {
+    if (argv[1] === 'sessions') return sessions({ fp: 'slow', groups: ['G1'] }, { fp: 'quick', groups: ['G1'] })
+    if (argv[3] === 'invite') return { stdout: JSON.stringify({ link: `link-${argv[2]}` }) }
+    return { stdout: '{}' }
+  }
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await settle()
+  h.children[0].write(READY)
+  await settle()
+  expect(h.spawns.at(-1)).toEqual(['/cache/letmeknow', '--session', 'slow', 'listen'])
+  await h.clock.advance(179_999)
+  expect(h.spawns.length).toBe(2)
+  await h.clock.advance(1)
+  expect(h.children[1].closed).toBe(true)
+  expect(h.spawns.at(-1)).toEqual(['/cache/letmeknow', '--session', 'quick', 'listen'])
+  h.children[2].write('{"type":"ready","fp":"quick","bin":"/cache/letmeknow"}\n')
+  await settle()
+  expect(h.runs.map(run => run.argv.slice(1).join(' '))).toEqual(['sessions', '--session quick invite --group G1', '--session 0123456789abcdef join link-quick'])
+  expect(h.children[2].closed).toBe(true)
+  expect(h.logs).toEqual([])
+})
+
+test('a Claude Code session that ends during a join stops the sibling it runs meanwhile, and joins no further', async ($, on) => {
+  const h = host(on, { settings: { join: ['G1', 'G2'] } })
+  let refuse = () => {}
+  h.answer = argv => {
+    if (argv[1] === 'sessions') return sessions({ fp: 'stopped', groups: ['G1', 'G2'] })
+    return new Promise(resolve => (refuse = () => resolve({ exitCode: 1, stderr: 'letmeknow: session stopped is not running\n' })))
+  }
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await settle()
+  h.children[0].write(READY)
+  await settle()
+  h.children[1].write('{"type":"ready","fp":"stopped","bin":"/cache/letmeknow"}\n')
+  await settle()
+  await end($, 'prompt_input_exit')
+  await settle()
+  expect(h.children.map(child => child.closed)).toEqual([true, true])
+  refuse()
+  await settle()
+  expect(h.runs.map(run => run.argv.slice(1).join(' '))).toEqual(['sessions', '--session stopped invite --group G1'])
+  expect(h.spawns.length).toBe(2)
+  expect(h.logs).toEqual([])
 })
 
 test('a session that draws nowhere at its start joins when the Desktop app, VS Code or a phone attaches', async ($, on) => {

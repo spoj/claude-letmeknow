@@ -1,6 +1,6 @@
 // Puts a Claude Code session in letmeknow: one in a terminal, and one the Desktop app, VS Code or a phone attaches to,
-// as a new letmeknow session, known by its fingerprint, which goes when the Claude Code session ends in no group.
-// Its `letmeknow listen` runs through npx, as letmeknow's skill has agents run it, but with the newest release of the
+// as a new letmeknow session, known by its fingerprint, which joins the groups of ~/.claude/letmeknow.json and goes when
+// the Claude Code session ends in no group. Its `letmeknow listen` runs through npx, as letmeknow's skill has agents run it, but with the newest release of the
 // minor version it speaks by its exact version, which it looks up on npm: npx takes any release it has cached for a
 // range. What it prints reaches Claude as one prompt from this plugin, once none came for a moment; its `ready` names
 // the session's fingerprint and its own program, which runs the commands of Claude's letmeknow tool, once ready. The
@@ -8,6 +8,9 @@
 // add to the system prompt.
 const MINOR = '0.24'
 const TOOL = 'mcp__letmeknow__letmeknow'
+// How long a sibling has to start and make its invite: back from a while away, its invite first catches up, up to about
+// two minutes.
+const INVITE_WAIT = 180_000
 // How long the lines the session prints wait for more before they reach Claude together.
 const DEBOUNCE = 2000
 
@@ -36,6 +39,69 @@ async function newest($) {
 	return latest
 }
 
+// Runs a letmeknow command, `argv`, and answers what it prints; one that fails throws what it printed to stderr.
+async function letmeknow($, argv, init) {
+	const { exitCode, stdout, stderr } = await $.process.run(argv, init)
+	if (exitCode !== 0) throw new Error(stderr.trim() || `letmeknow exited with ${exitCode}`)
+	return stdout
+}
+
+// The groups each session joins as it starts, by id: `{ "join": ["<group id>"] }`.
+async function settings($) {
+	const path = `${await $.env.get('HOME')}/.claude/letmeknow.json`
+	return (await $.fs.exists(path)) ? JSON.parse(await $.fs.read(path)) : {}
+}
+
+// An invite into `group` from `sibling`, another session of this machine in it: a running one, or a stopped one that runs
+// only until `use` is done with the link, or the Claude Code session ends. A sibling that has no invite within
+// INVITE_WAIT fails, so that the next one is asked.
+async function inviteFrom($, current, bin, sibling, group, use) {
+	const invite = async () => JSON.parse(await letmeknow($, [bin, '--session', sibling.fp, 'invite', '--group', group], { timeoutMs: INVITE_WAIT })).link
+	if (sibling.running) return use(await invite())
+	const listen = $.process.spawn({ argv: [bin, '--session', sibling.fp, 'listen'] })
+	current.sibling = listen
+	try {
+		await new Promise((resolve, reject) => {
+			$.clock.after(INVITE_WAIT, () => reject(new Error(`session ${sibling.fp} was not ready within ${INVITE_WAIT / 1000} s`)))
+			;(async () => {
+				let printed = ''
+				let errors = ''
+				for await (const { stream, text } of listen) {
+					if (stream === 'stderr') errors += text
+					// Its first line is its `ready`.
+					else if ((printed += text).includes('\n')) resolve()
+				}
+				reject(new Error(`session ${sibling.fp} stopped (exit ${(await listen.result).code}): ${errors.trim()}`))
+			})().catch(reject)
+		})
+		await use(await invite())
+	} finally {
+		listen.return()
+	}
+}
+
+// Joins the session `fp` to each listed group it is not in, through a sibling: a running one first; until the Claude Code
+// session ends.
+async function joinListed($, current, bin, fp) {
+	if (!current.join.length) return
+	const { sessions } = JSON.parse(await letmeknow($, [bin, 'sessions']))
+	for (const group of current.join) {
+		if (sessions.find(s => s.fp === fp)?.groups?.includes(group)) continue
+		const siblings = sessions.filter(s => s.fp !== fp && s.groups?.includes(group)).sort((a, b) => Number(!!b.running) - Number(!!a.running))
+		const failures = []
+		for (const sibling of siblings) {
+			if (session !== current) return
+			try {
+				await inviteFrom($, current, bin, sibling, group, link => letmeknow($, [bin, '--session', fp, 'join', link], { timeoutMs: 600_000 }))
+				break
+			} catch (error) {
+				failures.push(`${sibling.fp}: ${error.message}`)
+			}
+		}
+		if (failures.length === siblings.length && session === current) $.ui.log(`letmeknow: cannot join ${group} through a session of this machine${failures.length ? ` (${failures.join('; ')})` : ''}`)
+	}
+}
+
 async function start($) {
 	if (session) return
 	const current = {}
@@ -53,14 +119,21 @@ async function start($) {
 		},
 		isDeferred: false,
 	})
-	void begin($, current)
+	begin($, current).catch(error => {
+		current.reject(error)
+		if (session === current) $.ui.log(`letmeknow: ${error.message}`)
+	})
 }
 
 async function begin($, current) {
-	const version = await newest($).catch(error => {
-		$.ui.log(`letmeknow: cannot look up the newest ${MINOR} release (${error.message}); npx runs one it has`)
-		return MINOR
-	})
+	const [version, { join = [] }] = await Promise.all([
+		newest($).catch(error => {
+			$.ui.log(`letmeknow: cannot look up the newest ${MINOR} release (${error.message}); npx runs one it has`)
+			return MINOR
+		}),
+		settings($),
+	])
+	current.join = join
 	await run($, current, ['npx', '-y', `@letmeknow/cli@${version}`, 'listen'])
 }
 
@@ -91,6 +164,7 @@ async function run($, current, argv, exited = (code, errors) => stopped($, curre
 					await $.env.set('LETMEKNOW_SESSION', event.fp)
 					$.ui.status(event.fp)
 					current.resolve()
+					joinListed($, current, event.bin, event.fp).catch(error => session === current && $.ui.log(`letmeknow: joining the groups of ~/.claude/letmeknow.json: ${error.message}`))
 				}
 			}
 		}
@@ -121,17 +195,15 @@ export function register(on) {
 		const current = session
 		await current.ready
 		// The longest run allowed: `join` waits for its inviter.
-		const { exitCode, stdout, stderr } = await $.process.run(
-			[current.bin, '--session', current.fp, ...e.args],
-			{ stdin: e.input ?? '', timeoutMs: 600_000 },
-		)
-		return exitCode === 0 ? { result: stdout } : { deny: stderr.trim() || `letmeknow exited with ${exitCode}` }
+		return { result: await letmeknow($, [current.bin, '--session', current.fp, ...e.args], { stdin: e.input ?? '', timeoutMs: 600_000 }) }
 	}).catch(($, e, next) => ({ deny: next.error.message }))
 	// After /clear or /resume the process goes on without a new session.start, and so does its letmeknow session.
 	// letmeknow deletes one that stops in no group.
 	on('session.end', ($, e, next) => {
 		if (!session || e.reason === 'clear' || e.reason === 'resume') return next(e)
 		session.listen.return()
+		// A sibling run for a join stops too.
+		session.sibling?.return()
 		session.reject(new Error('this Claude Code session has left letmeknow'))
 		session = undefined
 		timer?.cancel()
