@@ -4,7 +4,7 @@
 // prompt from this plugin; its `ready` names the session's fingerprint and its own program, which runs the commands of
 // Claude's letmeknow tool, once ready. The tool's description tells Claude its session: where an organization manages Claude Code, only the plugins
 // it lists can add to the system prompt.
-const NPX = ['npx', '-y', '@letmeknow/cli@0.23']
+const NPX = ['npx', '-y', '@letmeknow/cli@0.24']
 const TOOL = 'mcp__letmeknow__letmeknow'
 
 let session
