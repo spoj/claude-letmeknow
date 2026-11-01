@@ -1,10 +1,12 @@
 // Puts a Claude Code session in letmeknow: one in a terminal, and one the Desktop app, VS Code or a phone attaches to,
 // as a new letmeknow session, known by its fingerprint, which goes when the Claude Code session ends in no group.
-// Its `letmeknow listen` runs as letmeknow's skill has agents run it, through npx. What it prints reaches Claude as one
-// prompt from this plugin, once none came for a moment; its `ready` names the session's fingerprint and its own program,
-// which runs the commands of Claude's letmeknow tool, once ready. The tool's description tells Claude its session: where
-// an organization manages Claude Code, only the plugins it lists can add to the system prompt.
-const NPX = ['npx', '-y', '@letmeknow/cli@0.24']
+// Its `letmeknow listen` runs through npx, as letmeknow's skill has agents run it, but with the newest release of the
+// minor version it speaks by its exact version, which it looks up on npm: npx takes any release it has cached for a
+// range. What it prints reaches Claude as one prompt from this plugin, once none came for a moment; its `ready` names
+// the session's fingerprint and its own program, which runs the commands of Claude's letmeknow tool, once ready. The
+// tool's description tells Claude its session: where an organization manages Claude Code, only the plugins it lists can
+// add to the system prompt.
+const MINOR = '0.24'
 const TOOL = 'mcp__letmeknow__letmeknow'
 // How long the lines the session prints wait for more before they reach Claude together.
 const DEBOUNCE = 2000
@@ -20,6 +22,18 @@ function wake($, line) {
 		void $.prompt.submit({ text: waiting.join('\n') })
 		waiting = []
 	})
+}
+
+// The newest stable MINOR release on npm.
+async function newest($) {
+	const found = await $.http.fetch('https://registry.npmjs.org/@letmeknow/cli', { headers: { accept: 'application/vnd.npm.install-v1+json' } })
+	if (!found.ok) throw new Error(`npm has no @letmeknow/cli (${found.status})`)
+	const latest = Object.keys(JSON.parse(found.text).versions)
+		.filter(version => version.startsWith(`${MINOR}.`) && /^\d+\.\d+\.\d+$/.test(version))
+		.sort((a, b) => a.split('.')[2] - b.split('.')[2])
+		.at(-1)
+	if (!latest) throw new Error(`letmeknow has no ${MINOR} release`)
+	return latest
 }
 
 async function start($) {
@@ -39,18 +53,30 @@ async function start($) {
 		},
 		isDeferred: false,
 	})
-	// A new session, not the one a LETMEKNOW_SESSION this process started with names, as a Pi's or another Claude Code
-	// session's: `listen` inherits the process's environment, and takes the session it names.
-	await $.env.set('LETMEKNOW_SESSION', undefined)
-	current.listen = $.process.spawn({ argv: [...NPX, 'listen'] })
-	void deliver($, current)
+	void begin($, current)
 }
 
-async function deliver($, current) {
+async function begin($, current) {
+	const version = await newest($).catch(error => {
+		$.ui.log(`letmeknow: cannot look up the newest ${MINOR} release (${error.message}); npx runs one it has`)
+		return MINOR
+	})
+	await run($, current, ['npx', '-y', `@letmeknow/cli@${version}`, 'listen'])
+}
+
+// Runs `argv`, `listen`: what it prints reaches Claude, and its `ready` names the session. Once it stops, `exited` hears
+// its exit code and what it printed to stderr last.
+async function run($, current, argv, exited = (code, errors) => stopped($, current, code, errors)) {
+	// A new session, not the one a LETMEKNOW_SESSION this process holds names, as a Pi's or another Claude Code session's:
+	// `listen` inherits the process's environment, and takes the session it names.
+	await $.env.set('LETMEKNOW_SESSION', undefined)
+	const listen = $.process.spawn({ argv })
+	current.listen = listen
 	let rest = ''
 	let errors = ''
+	let code = null
 	try {
-		for await (const { stream, text } of current.listen) {
+		for await (const { stream, text } of listen) {
 			if (stream === 'stderr') {
 				errors = (errors + text).slice(-2000)
 				continue
@@ -68,13 +94,16 @@ async function deliver($, current) {
 				}
 			}
 		}
-		const stopped = `letmeknow stopped (exit ${(await current.listen.result).code}): ${errors.trim()}`
-		current.reject(new Error(stopped))
-		if (session === current) $.ui.log(stopped)
+		;({ code } = await listen.result)
 	} catch (error) {
-		current.reject(error)
-		if (session === current) $.ui.log(`letmeknow: ${error.message}`)
+		errors = error.message
 	}
+	exited(code, errors.trim())
+}
+
+function stopped($, current, code, errors) {
+	current.reject(new Error(`letmeknow stopped (exit ${code}): ${errors}`))
+	if (session === current) $.ui.log(`letmeknow stopped (exit ${code}): ${errors}`)
 }
 
 export function register(on) {
