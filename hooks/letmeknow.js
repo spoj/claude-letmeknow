@@ -2,12 +2,12 @@
 // as a new letmeknow session, known by its fingerprint, which joins the groups of ~/.claude/letmeknow.json and goes
 // when the Claude Code session ends in no group; or as the session that file names to attach to, which runs on its own,
 // while it has no other reader. Its `letmeknow listen`, or `attach`, runs through npx, as letmeknow's skill has agents
-// run it, but with the newest release of the minor version it speaks by its exact version, which it looks up on npm:
-// npx takes any release it has cached for a range; /letmeknow-update runs the session again with a newer one, as the same
-// session. What it prints reaches Claude as one prompt from this plugin, once
-// none came for a moment; its `ready` names the session's fingerprint and its own program, which runs the commands of
-// Claude's letmeknow tool, once ready. The tool's description tells Claude its session: where an organization manages
-// Claude Code, only the plugins it lists can add to the system prompt.
+// run it, but with the newest release of the minor version it speaks, by its exact version, which it looks up on npm:
+// npx runs any release it has cached for a range. /letmeknow-update runs the session again with a newer one, as the
+// same session. What the session prints reaches Claude as one prompt from this plugin, once none came for a moment; its
+// `ready` names the session's fingerprint and its own program, which runs the commands of Claude's letmeknow tool, once
+// ready. The tool's description tells Claude its session: where an organization manages Claude Code, only the plugins
+// it lists can add to the system prompt.
 const MINOR = '0.24'
 const TOOL = 'mcp__letmeknow__letmeknow'
 // How long a sibling has to start and make its invite: back from a while away, its invite first catches up, up to about
@@ -35,7 +35,7 @@ async function newest($) {
 	if (!found.ok) throw new Error(`npm has no @letmeknow/cli (${found.status})`)
 	const latest = Object.keys(JSON.parse(found.text).versions)
 		.filter(version => version.startsWith(`${MINOR}.`) && /^\d+\.\d+\.\d+$/.test(version))
-		.sort((a, b) => a.split('.')[2] - b.split('.')[2])
+		.sort((a, b) => Number(a.split('.')[2]) - Number(b.split('.')[2]))
 		.at(-1)
 	if (!latest) throw new Error(`letmeknow has no ${MINOR} release`)
 	return latest
@@ -206,13 +206,14 @@ export function register(on) {
 		await start($)
 		return next(e)
 	})
-	// Commands wait for the session to be ready, and run with the program its `ready` names.
+	// Commands wait for the session to be ready, as long as a hook may (10 seconds, waits on `$` aside), and run with the
+	// program its `ready` names. A hook that runs out of time has no message.
 	on('tool.call', { tool: TOOL }, async ($, e) => {
 		const current = session
 		await current.ready
 		// The longest run allowed: `join` waits for its inviter.
 		return { result: await letmeknow($, [current.bin, '--session', current.fp, ...e.args], { stdin: e.input ?? '', timeoutMs: 600_000 }) }
-	}).catch(($, e, next) => ({ deny: next.error.message }))
+	}).catch(($, e, next) => ({ deny: next.error.message ?? 'letmeknow: the session is not ready yet' }))
 	// A command typed while Claude works runs once the turn ends.
 	on('command.run', { command: 'letmeknow-update' }, async $ => {
 		const current = session
@@ -236,7 +237,7 @@ export function register(on) {
 		while (JSON.parse(await letmeknow($, [current.bin, 'sessions'])).sessions.find(s => s.fp === fp)?.running) await $.clock.sleep(100)
 		if (session === current) void run($, current, [...program, ...(groups ? ['--session', fp, 'listen'] : ['listen'])])
 		return { text: `letmeknow: ${await current.ready} runs ${to}, updated from ${from}` }
-	}).catch(($, e, next) => ({ text: next.error.message }))
+	}).catch(($, e, next) => ({ text: next.error.message ?? 'letmeknow: the session is not ready yet' }))
 	// After /clear or /resume the process goes on without a new session.start, and so does its letmeknow session.
 	// letmeknow deletes one that stops in no group.
 	on('session.end', ($, e, next) => {

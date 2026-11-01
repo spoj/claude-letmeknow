@@ -13,6 +13,7 @@ function host(on: any, { versions = ['0.24.0'] as string[] | null, settings = un
   mock.env(on, { HOME: '/home/me' })
   const h = {
     clock: mock.clock(on),
+    versions,
     fetches: [] as unknown[],
     children: [] as Child[],
     get spawns() { return h.children.map(child => child.argv) },
@@ -68,7 +69,7 @@ function host(on: any, { versions = ['0.24.0'] as string[] | null, settings = un
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
   on('session.attach', ($: any, e: any) => ({ clientId: e.clientId }))
   on('session.end', ($: any, e: any) => ({ sessionId: e.sessionId }))
-  return Object.assign(h, { versions })
+  return h
 }
 
 const command = ($: any, args: string[], input?: string) => $.tool.call({ tool: TOOL, args, ...(input === undefined ? {} : { input }) })
