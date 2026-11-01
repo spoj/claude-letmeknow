@@ -252,12 +252,10 @@ test('a Claude Code session whose session to attach to has a reader already is a
 
 test('/letmeknow-update runs the session again with the newest patch, as the same session, or a new one if it is in no group', async ($, on) => {
   const h = host(on)
-  let running = 0
   let groups = '{"groups":[{"group":"G1"}]}'
   h.answer = argv => {
-    if (argv[1] === '--version') return { stdout: `letmeknow ${argv[0] === 'npx' ? argv[2].split('@')[2] : argv[0].split('/')[1]}\n` }
+    if (argv.at(-1) === '--version') return { stdout: `letmeknow ${argv[0] === 'npx' ? argv[2].split('@')[2] : argv[0].split('/')[1]}\n` }
     if (argv[3] === 'groups') return { stdout: groups }
-    if (argv[1] === 'sessions') return sessions({ fp: '0123456789abcdef', running: running-- > 0, groups: ['G1'] })
     return { stdout: `ran ${argv.join(' ')}` }
   }
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
@@ -269,18 +267,22 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   expect(h.spawns.length).toBe(1)
 
   h.versions = ['0.24.0', '0.24.1']
-  // Killed, it goes a moment later.
-  running = 1
   h.env.length = 0
   const updating = update($)
   await settle()
   expect(h.children[0].closed).toBe(true)
-  expect(h.spawns.length).toBe(1)
-  const waiting = command($, ['skill'])
-  await h.clock.advance(100)
   expect(h.spawns.at(-1)).toEqual(['npx', '-y', '@letmeknow/cli@0.24.1', '--session', '0123456789abcdef', 'listen'])
   expect(h.children[1].env).toEqual([['LETMEKNOW_SESSION', undefined]])
-  h.children[1].write(READY.replace('/cache/letmeknow', '/0.24.1/letmeknow'))
+  const waiting = command($, ['skill'])
+  // Killed, the session's process goes a moment later: until then, it runs already.
+  h.children[1].write('npm notice run npx\nletmeknow: this session is already running\n', 'stderr')
+  h.children[1].exit(1)
+  await settle()
+  await h.clock.advance(499)
+  expect(h.spawns.length).toBe(2)
+  await h.clock.advance(1)
+  expect(h.spawns.at(-1)).toEqual(['npx', '-y', '@letmeknow/cli@0.24.1', '--session', '0123456789abcdef', 'listen'])
+  h.children[2].write(READY.replace('/cache/letmeknow', '/0.24.1/letmeknow'))
   expect(await updating).toEqual({ text: '0123456789abcdef runs 0.24.1, updated from 0.24.0' })
   // Tools wait for the session to run again.
   expect(await waiting).toMatchObject({ result: 'ran /0.24.1/letmeknow --session 0123456789abcdef skill' })
@@ -289,8 +291,6 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
     ['/0.24.0/letmeknow --version', undefined],
     ['npx -y @letmeknow/cli@0.24.1 --version', 600_000],
     ['/0.24.0/letmeknow --session 0123456789abcdef groups', undefined],
-    ['/0.24.0/letmeknow sessions', undefined],
-    ['/0.24.0/letmeknow sessions', undefined],
     ['/0.24.1/letmeknow --session 0123456789abcdef skill', 600_000],
   ])
   expect(h.status).toEqual(['0123456789abcdef', '0123456789abcdef'])
@@ -300,15 +300,45 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   groups = '{}'
   const renewing = update($)
   await settle()
-  expect([h.children[1].closed, h.spawns.at(-1)]).toEqual([true, ['npx', '-y', '@letmeknow/cli@0.24.2', 'listen']])
-  h.children[2].write('{"type":"ready","fp":"3123456789abcdef","bin":"/0.24.2/letmeknow"}\n')
+  expect([h.children[2].closed, h.spawns.at(-1)]).toEqual([true, ['npx', '-y', '@letmeknow/cli@0.24.2', 'listen']])
+  h.children[3].write('{"type":"ready","fp":"3123456789abcdef","bin":"/0.24.2/letmeknow"}\n')
   expect(await renewing).toEqual({ text: '3123456789abcdef runs 0.24.2, updated from 0.24.1' })
   expect(h.status.at(-1)).toBe('3123456789abcdef')
   expect(h.env.at(-1)).toEqual(['LETMEKNOW_SESSION', '3123456789abcdef'])
   expect(h.logs).toEqual([])
   await end($, 'prompt_input_exit')
   await settle()
-  expect(h.children[2].closed).toBe(true)
+  expect(h.children[3].closed).toBe(true)
+})
+
+test('/letmeknow-update during a join stops the sibling it runs, and the join goes no further', async ($, on) => {
+  const h = host(on, { settings: { join: ['G1', 'G2'] } })
+  let refuse = () => {}
+  h.answer = argv => {
+    if (argv.at(-1) === '--version') return { stdout: `letmeknow ${argv[0] === 'npx' ? argv[2].split('@')[2] : '0.24.0'}\n` }
+    if (argv[3] === 'groups') return { stdout: '{}' }
+    if (argv[1] === 'sessions') return sessions({ fp: 'stopped', groups: ['G1', 'G2'] })
+    return new Promise(resolve => (refuse = () => resolve({ exitCode: 1, stderr: 'letmeknow: session process stopped\n' })))
+  }
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await settle()
+  h.children[0].write(READY)
+  await settle()
+  h.children[1].write('{"type":"ready","fp":"stopped","bin":"/cache/letmeknow"}\n')
+  await settle()
+  h.versions = ['0.24.0', '0.24.1']
+  const updating = update($)
+  await settle()
+  expect(h.children.map(child => child.closed)).toEqual([true, true, false])
+  refuse()
+  await settle()
+  expect(h.runs.map(run => run.argv.slice(1).join(' ')).filter(args => !args.includes('version') && !args.includes('groups'))).toEqual(['sessions', '--session stopped invite --group G1'])
+  expect(h.logs).toEqual([])
+  h.children[2].write('{"type":"ready","fp":"3123456789abcdef","bin":"/cache/letmeknow"}\n')
+  expect(await updating).toEqual({ text: '3123456789abcdef runs 0.24.1, updated from 0.24.0' })
+  await settle()
+  // The new session joins the listed groups.
+  expect(h.spawns.at(-1)).toEqual(['/cache/letmeknow', '--session', 'stopped', 'listen'])
 })
 
 test('/letmeknow-update leaves the session as it is where npm cannot be reached', async ($, on) => {
