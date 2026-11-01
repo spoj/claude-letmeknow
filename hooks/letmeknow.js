@@ -1,13 +1,26 @@
 // Puts a Claude Code session in letmeknow: one in a terminal, and one the Desktop app, VS Code or a phone attaches to,
 // as a new letmeknow session, known by its fingerprint, which goes when the Claude Code session ends in no group.
-// Its `letmeknow listen` runs as letmeknow's skill has agents run it, through npx. What it prints reaches Claude as a
-// prompt from this plugin; its `ready` names the session's fingerprint and its own program, which runs the commands of
-// Claude's letmeknow tool, once ready. The tool's description tells Claude its session: where an organization manages Claude Code, only the plugins
-// it lists can add to the system prompt.
+// Its `letmeknow listen` runs as letmeknow's skill has agents run it, through npx. What it prints reaches Claude as one
+// prompt from this plugin, once none came for a moment; its `ready` names the session's fingerprint and its own program,
+// which runs the commands of Claude's letmeknow tool, once ready. The tool's description tells Claude its session: where
+// an organization manages Claude Code, only the plugins it lists can add to the system prompt.
 const NPX = ['npx', '-y', '@letmeknow/cli@0.24']
 const TOOL = 'mcp__letmeknow__letmeknow'
+// How long the lines the session prints wait for more before they reach Claude together.
+const DEBOUNCE = 2000
 
 let session
+let waiting = []
+let timer
+
+function wake($, line) {
+	waiting.push(line)
+	timer?.cancel()
+	timer = $.clock.after(DEBOUNCE, () => {
+		void $.prompt.submit({ text: waiting.join('\n') })
+		waiting = []
+	})
+}
 
 async function start($) {
 	if (session) return
@@ -44,10 +57,9 @@ async function deliver($, current) {
 			}
 			const lines = (rest + text).split('\n')
 			rest = lines.pop()
-			const events = []
 			for (const line of lines) {
 				const event = JSON.parse(line)
-				if (event.type !== 'ready') events.push(line)
+				if (event.type !== 'ready') wake($, line)
 				else {
 					Object.assign(current, { bin: event.bin, fp: event.fp })
 					await $.env.set('LETMEKNOW_SESSION', event.fp)
@@ -55,7 +67,6 @@ async function deliver($, current) {
 					current.resolve()
 				}
 			}
-			if (events.length) void $.prompt.submit({ text: events.join('\n') })
 		}
 		const stopped = `letmeknow stopped (exit ${(await current.listen.result).code}): ${errors.trim()}`
 		current.reject(new Error(stopped))
@@ -94,6 +105,8 @@ export function register(on) {
 		session.listen.return()
 		session.reject(new Error('this Claude Code session has left letmeknow'))
 		session = undefined
+		timer?.cancel()
+		waiting = []
 		return next(e)
 	})
 }

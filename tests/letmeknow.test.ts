@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 const TOOL = 'mcp__letmeknow__letmeknow'
 const NPX = ['npx', '-y', '@letmeknow/cli@0.24']
@@ -7,6 +7,7 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 // Stubs what the mod calls, with a `listen` whose output the test writes.
 function host(on: any, { fail = undefined as string | undefined } = {}) {
   const h = {
+    clock: mock.clock(on),
     spawns: [] as string[][],
     envAtSpawn: [] as [string, unknown][],
     tools: [] as any[],
@@ -75,8 +76,17 @@ test('a terminal session joins letmeknow, hears what listen prints, and runs com
   expect(h.status).toEqual(['0123456789abcdef'])
   expect(h.env).toEqual([['LETMEKNOW_SESSION', undefined], ['LETMEKNOW_SESSION', '0123456789abcdef']])
   h.write('i"}\n')
-  h.write('{"type":"joined","member":"ann"}\n{"type":"message","content":"two"}\n')
   await settle()
+  await h.clock.advance(2000)
+  h.write('{"type":"joined","member":"ann"}\n')
+  await settle()
+  await h.clock.advance(1500)
+  h.write('{"type":"message","content":"two"}\n')
+  await settle()
+  await h.clock.advance(1999)
+  expect(h.submits).toEqual(['{"type":"message","content":"hi"}'])
+  // Lines wake Claude together, 2 seconds after the last.
+  await h.clock.advance(1)
   expect(h.submits).toEqual(['{"type":"message","content":"hi"}', '{"type":"joined","member":"ann"}\n{"type":"message","content":"two"}'])
 
   expect(await command($, ['send', '--to', 'ann', '-'], 'hello')).toMatchObject({ result: 'ran /cache/letmeknow --session 0123456789abcdef send --to ann -' })
