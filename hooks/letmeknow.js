@@ -101,7 +101,7 @@ async function joinListed($, current, bin, fp) {
 				failures.push(`${sibling.fp}: ${error.message}`)
 			}
 		}
-		if (failures.length === siblings.length && session === current) $.ui.log(`letmeknow: cannot join ${group} through a session of this machine${failures.length ? ` (${failures.join('; ')})` : ''}`)
+		if (failures.length === siblings.length && session === current) $.ui.log(`cannot join ${group} through a session of this machine${failures.length ? ` (${failures.join('; ')})` : ''}`)
 	}
 }
 
@@ -128,14 +128,14 @@ async function start($) {
 	})
 	begin($, current).catch(error => {
 		current.reject(error)
-		if (session === current) $.ui.log(`letmeknow: ${error.message}`)
+		if (session === current) $.ui.log(error.message)
 	})
 }
 
 async function begin($, current) {
 	const [version, { join = [], attach }] = await Promise.all([
 		newest($).catch(error => {
-			$.ui.log(`letmeknow: cannot look up the newest ${MINOR} release (${error.message}); npx runs one it has`)
+			$.ui.log(`cannot look up the newest ${MINOR} release (${error.message}); npx runs one it has`)
 			return MINOR
 		}),
 		settings($),
@@ -146,7 +146,7 @@ async function begin($, current) {
 	// One that has a reader already, or does not run, leaves this Claude Code session a new letmeknow session.
 	await run($, current, [...program, '--session', attach, 'attach'], (code, errors) => {
 		if (current.fp || session !== current) return stopped($, current, code, errors)
-		$.ui.log(`letmeknow: not attached to ${attach} (${errors}); this Claude Code session is a new letmeknow session`)
+		$.ui.log(`not attached to ${attach} (${errors}); this Claude Code session is a new letmeknow session`)
 		return run($, current, [...program, 'listen'])
 	})
 }
@@ -179,7 +179,7 @@ async function run($, current, argv, exited = (code, errors) => stopped($, curre
 					await $.env.set('LETMEKNOW_SESSION', event.fp)
 					$.ui.status(event.fp)
 					current.resolve(event.fp)
-					joinListed($, current, event.bin, event.fp).catch(error => session === current && $.ui.log(`letmeknow: joining the groups of ~/.claude/letmeknow.json: ${error.message}`))
+					joinListed($, current, event.bin, event.fp).catch(error => session === current && $.ui.log(`joining the groups of ~/.claude/letmeknow.json: ${error.message}`))
 				}
 			}
 		}
@@ -191,9 +191,10 @@ async function run($, current, argv, exited = (code, errors) => stopped($, curre
 	if (current.listen === listen) return exited(code, errors.trim())
 }
 
+// What the plugin logs, as a command's output, shows under its name.
 function stopped($, current, code, errors) {
 	current.reject(new Error(`letmeknow stopped (exit ${code}): ${errors}`))
-	if (session === current) $.ui.log(`letmeknow stopped (exit ${code}): ${errors}`)
+	if (session === current) $.ui.log(`stopped (exit ${code}): ${errors}`)
 }
 
 export function register(on) {
@@ -213,15 +214,15 @@ export function register(on) {
 		await current.ready
 		// The longest run allowed: `join` waits for its inviter.
 		return { result: await letmeknow($, [current.bin, '--session', current.fp, ...e.args], { stdin: e.input ?? '', timeoutMs: 600_000 }) }
-	}).catch(($, e, next) => ({ deny: next.error.message ?? 'letmeknow: the session is not ready yet' }))
+	}).catch(($, e, next) => ({ deny: next.error.message ?? 'the letmeknow session is not ready yet' }))
 	// A command typed while Claude works runs once the turn ends.
 	on('command.run', { command: 'letmeknow-update' }, async $ => {
 		const current = session
 		const fp = await current.ready
-		if (current.attached) return { text: `letmeknow: ${fp} runs on its own; run it again with the newer program to update it` }
+		if (current.attached) return { text: `${fp} runs on its own; run it again with the newer program to update it` }
 		const to = await newest($)
 		const from = (await letmeknow($, [current.bin, '--version'])).trim().split(' ')[1]
-		if (from === to) return { text: `letmeknow: ${fp} runs ${to}, the newest ${MINOR} release` }
+		if (from === to) return { text: `${fp} runs ${to}, the newest ${MINOR} release` }
 		const program = ['npx', '-y', `@letmeknow/cli@${to}`]
 		// npx fetches it while the session runs on.
 		await letmeknow($, [...program, '--version'], { timeoutMs: 600_000 })
@@ -236,8 +237,8 @@ export function register(on) {
 		// The engine kills a process without waiting for it to go, and the session runs again only once it has.
 		while (JSON.parse(await letmeknow($, [current.bin, 'sessions'])).sessions.find(s => s.fp === fp)?.running) await $.clock.sleep(100)
 		if (session === current) void run($, current, [...program, ...(groups ? ['--session', fp, 'listen'] : ['listen'])])
-		return { text: `letmeknow: ${await current.ready} runs ${to}, updated from ${from}` }
-	}).catch(($, e, next) => ({ text: next.error.message ?? 'letmeknow: the session is not ready yet' }))
+		return { text: `${await current.ready} runs ${to}, updated from ${from}` }
+	}).catch(($, e, next) => ({ text: next.error.message ?? 'the session is not ready yet' }))
 	// After /clear or /resume the process goes on without a new session.start, and so does its letmeknow session.
 	// letmeknow deletes one that stops in no group.
 	on('session.end', ($, e, next) => {

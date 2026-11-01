@@ -129,7 +129,7 @@ test('a session that cannot look up the newest release runs one npx has', async 
   const h = host(on, { versions: null })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await settle()
-  expect(h.logs).toEqual(['letmeknow: cannot look up the newest 0.24 release (letmeknow: $.http.fetch: getaddrinfo ENOTFOUND registry.npmjs.org); npx runs one it has'])
+  expect(h.logs).toEqual(['cannot look up the newest 0.24 release (letmeknow: $.http.fetch: getaddrinfo ENOTFOUND registry.npmjs.org); npx runs one it has'])
   expect(h.spawns).toEqual([['npx', '-y', '@letmeknow/cli@0.24', 'listen']])
 })
 
@@ -157,7 +157,7 @@ test('a new session joins the listed groups it is not in, through a running sibl
     ['--session 0123456789abcdef join link-stopped-G2', 600_000],
   ])
   expect(h.children[1].closed).toBe(true)
-  expect(h.logs).toEqual(['letmeknow: cannot join G3 through a session of this machine'])
+  expect(h.logs).toEqual(['cannot join G3 through a session of this machine'])
 })
 
 test('a sibling that has no invite within 3 minutes fails, and the next is asked', async ($, on) => {
@@ -223,7 +223,7 @@ test('a Claude Code session attaches to the session letmeknow.json names, as its
   await command($, ['groups'])
   expect(h.runs.at(-1)?.argv).toEqual(['/detached/newer', '--session', 'fedcba9876543210', 'groups'])
   // One that runs on its own is updated by running it again.
-  expect(await update($)).toEqual({ text: 'letmeknow: fedcba9876543210 runs on its own; run it again with the newer program to update it' })
+  expect(await update($)).toEqual({ text: 'fedcba9876543210 runs on its own; run it again with the newer program to update it' })
   expect(h.runs.length).toBe(2)
   await end($, 'prompt_input_exit')
   await settle()
@@ -240,7 +240,7 @@ test('a Claude Code session whose session to attach to has a reader already is a
   h.children[0].write('letmeknow: session fedcba9876543210 has a reader attached already\n', 'stderr')
   h.children[0].exit(1)
   await settle()
-  expect(h.logs).toEqual(['letmeknow: not attached to fedcba9876543210 (letmeknow: session fedcba9876543210 has a reader attached already); this Claude Code session is a new letmeknow session'])
+  expect(h.logs).toEqual(['not attached to fedcba9876543210 (letmeknow: session fedcba9876543210 has a reader attached already); this Claude Code session is a new letmeknow session'])
   expect(h.spawns.at(-1)).toEqual(LISTEN)
   h.children[1].write(READY)
   await settle()
@@ -265,7 +265,7 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   expect(h.commands).toEqual([{ name: 'letmeknow-update', description: "Runs this Claude Code session's letmeknow session again with the newest 0.24 release, as the same session, once Claude is idle" }])
   h.children[0].write(READY.replace('/cache/letmeknow', '/0.24.0/letmeknow'))
   await settle()
-  expect(await update($)).toEqual({ text: 'letmeknow: 0123456789abcdef runs 0.24.0, the newest 0.24 release' })
+  expect(await update($)).toEqual({ text: '0123456789abcdef runs 0.24.0, the newest 0.24 release' })
   expect(h.spawns.length).toBe(1)
 
   h.versions = ['0.24.0', '0.24.1']
@@ -281,7 +281,7 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   expect(h.spawns.at(-1)).toEqual(['npx', '-y', '@letmeknow/cli@0.24.1', '--session', '0123456789abcdef', 'listen'])
   expect(h.children[1].env).toEqual([['LETMEKNOW_SESSION', undefined]])
   h.children[1].write(READY.replace('/cache/letmeknow', '/0.24.1/letmeknow'))
-  expect(await updating).toEqual({ text: 'letmeknow: 0123456789abcdef runs 0.24.1, updated from 0.24.0' })
+  expect(await updating).toEqual({ text: '0123456789abcdef runs 0.24.1, updated from 0.24.0' })
   // Tools wait for the session to run again.
   expect(await waiting).toMatchObject({ result: 'ran /0.24.1/letmeknow --session 0123456789abcdef skill' })
   expect(h.runs.map(run => [run.argv.join(' '), run.timeoutMs])).toEqual([
@@ -302,7 +302,7 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   await settle()
   expect([h.children[1].closed, h.spawns.at(-1)]).toEqual([true, ['npx', '-y', '@letmeknow/cli@0.24.2', 'listen']])
   h.children[2].write('{"type":"ready","fp":"3123456789abcdef","bin":"/0.24.2/letmeknow"}\n')
-  expect(await renewing).toEqual({ text: 'letmeknow: 3123456789abcdef runs 0.24.2, updated from 0.24.1' })
+  expect(await renewing).toEqual({ text: '3123456789abcdef runs 0.24.2, updated from 0.24.1' })
   expect(h.status.at(-1)).toBe('3123456789abcdef')
   expect(h.env.at(-1)).toEqual(['LETMEKNOW_SESSION', '3123456789abcdef'])
   expect(h.logs).toEqual([])
@@ -360,7 +360,7 @@ test('a listen that stops is told in the transcript', async ($, on) => {
   h.children[0].write('error: cannot save state\n', 'stderr')
   h.children[0].exit(1)
   await settle()
-  expect(h.logs).toEqual(['letmeknow stopped (exit 1): npm warn exec\nerror: cannot save state'])
+  expect(h.logs).toEqual(['stopped (exit 1): npm warn exec\nerror: cannot save state'])
 })
 
 test('a listen that cannot start is told in the transcript', async ($, on) => {
