@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 const TOOL = 'mcp__letmeknow__letmeknow'
-const LISTEN = ['npx', '-y', '@letmeknow/cli@0.24.0', 'listen']
+const LISTEN = ['npx', '-y', '--loglevel=error', '@letmeknow/cli@0.24.0', 'listen']
 const READY = '{"type":"ready","fp":"0123456789abcdef","bin":"/cache/letmeknow"}\n'
 const settle = () => new Promise(resolve => setTimeout(resolve, 20))
 
@@ -121,7 +121,7 @@ test('a session runs the newest stable 0.24 release on npm, by its exact version
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await settle()
   expect(h.fetches).toEqual([{ url: 'https://registry.npmjs.org/@letmeknow/cli', init: { headers: { accept: 'application/vnd.npm.install-v1+json' } } }])
-  expect(h.spawns).toEqual([['npx', '-y', '@letmeknow/cli@0.24.10', 'listen']])
+  expect(h.spawns).toEqual([['npx', '-y', '--loglevel=error', '@letmeknow/cli@0.24.10', 'listen']])
   expect(h.logs).toEqual([])
 })
 
@@ -130,7 +130,7 @@ test('a session that cannot look up the newest release runs one npx has', async 
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await settle()
   expect(h.logs).toEqual(['cannot look up the newest 0.24 release (letmeknow: $.http.fetch: getaddrinfo ENOTFOUND registry.npmjs.org); npx runs one it has'])
-  expect(h.spawns).toEqual([['npx', '-y', '@letmeknow/cli@0.24', 'listen']])
+  expect(h.spawns).toEqual([['npx', '-y', '--loglevel=error', '@letmeknow/cli@0.24', 'listen']])
 })
 
 const sessions = (...list: object[]) => ({ stdout: JSON.stringify({ sessions: list }) })
@@ -211,7 +211,7 @@ test('a Claude Code session attaches to the session letmeknow.json names, as its
   const h = host(on, { settings: { attach: 'fedcba9876543210' } })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await settle()
-  expect(h.spawns).toEqual([['npx', '-y', '@letmeknow/cli@0.24.0', '--session', 'fedcba9876543210', 'attach']])
+  expect(h.spawns).toEqual([['npx', '-y', '--loglevel=error', '@letmeknow/cli@0.24.0', '--session', 'fedcba9876543210', 'attach']])
   h.children[0].write('{"type":"ready","fp":"fedcba9876543210","bin":"/detached/letmeknow"}\n')
   await settle()
   expect(h.status).toEqual(['fedcba9876543210'])
@@ -254,7 +254,7 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   const h = host(on)
   let groups = '{"groups":[{"group":"G1"}]}'
   h.answer = argv => {
-    if (argv.at(-1) === '--version') return { stdout: `letmeknow ${argv[0] === 'npx' ? argv[2].split('@')[2] : argv[0].split('/')[1]}\n` }
+    if (argv.at(-1) === '--version') return { stdout: `letmeknow ${argv[0] === 'npx' ? argv[3].split('@')[2] : argv[0].split('/')[1]}\n` }
     if (argv[3] === 'groups') return { stdout: groups }
     return { stdout: `ran ${argv.join(' ')}` }
   }
@@ -271,7 +271,7 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   const updating = update($)
   await settle()
   expect(h.children[0].closed).toBe(true)
-  expect(h.spawns.at(-1)).toEqual(['npx', '-y', '@letmeknow/cli@0.24.1', '--session', '0123456789abcdef', 'listen'])
+  expect(h.spawns.at(-1)).toEqual(['npx', '-y', '--loglevel=error', '@letmeknow/cli@0.24.1', '--session', '0123456789abcdef', 'listen'])
   expect(h.children[1].env).toEqual([['LETMEKNOW_SESSION', undefined]])
   const waiting = command($, ['skill'])
   // Killed, the session's process goes a moment later: until then, it runs already.
@@ -281,7 +281,7 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   await h.clock.advance(499)
   expect(h.spawns.length).toBe(2)
   await h.clock.advance(1)
-  expect(h.spawns.at(-1)).toEqual(['npx', '-y', '@letmeknow/cli@0.24.1', '--session', '0123456789abcdef', 'listen'])
+  expect(h.spawns.at(-1)).toEqual(['npx', '-y', '--loglevel=error', '@letmeknow/cli@0.24.1', '--session', '0123456789abcdef', 'listen'])
   h.children[2].write(READY.replace('/cache/letmeknow', '/0.24.1/letmeknow'))
   expect(await updating).toEqual({ text: '0123456789abcdef runs 0.24.1, updated from 0.24.0' })
   // Tools wait for the session to run again.
@@ -289,7 +289,7 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   expect(h.runs.map(run => [run.argv.join(' '), run.timeoutMs])).toEqual([
     ['/0.24.0/letmeknow --version', undefined],
     ['/0.24.0/letmeknow --version', undefined],
-    ['npx -y @letmeknow/cli@0.24.1 --version', 600_000],
+    ['npx -y --loglevel=error @letmeknow/cli@0.24.1 --version', 600_000],
     ['/0.24.0/letmeknow --session 0123456789abcdef groups', undefined],
     ['/0.24.1/letmeknow --session 0123456789abcdef skill', 600_000],
   ])
@@ -300,7 +300,7 @@ test('/letmeknow-update runs the session again with the newest patch, as the sam
   groups = '{}'
   const renewing = update($)
   await settle()
-  expect([h.children[2].closed, h.spawns.at(-1)]).toEqual([true, ['npx', '-y', '@letmeknow/cli@0.24.2', 'listen']])
+  expect([h.children[2].closed, h.spawns.at(-1)]).toEqual([true, ['npx', '-y', '--loglevel=error', '@letmeknow/cli@0.24.2', 'listen']])
   h.children[3].write('{"type":"ready","fp":"3123456789abcdef","bin":"/0.24.2/letmeknow"}\n')
   expect(await renewing).toEqual({ text: '3123456789abcdef runs 0.24.2, updated from 0.24.1' })
   expect(h.status.at(-1)).toBe('3123456789abcdef')
@@ -315,7 +315,7 @@ test('/letmeknow-update during a join stops the sibling it runs, and the join go
   const h = host(on, { settings: { join: ['G1', 'G2'] } })
   let refuse = () => {}
   h.answer = argv => {
-    if (argv.at(-1) === '--version') return { stdout: `letmeknow ${argv[0] === 'npx' ? argv[2].split('@')[2] : '0.24.0'}\n` }
+    if (argv.at(-1) === '--version') return { stdout: `letmeknow ${argv[0] === 'npx' ? argv[3].split('@')[2] : '0.24.0'}\n` }
     if (argv[3] === 'groups') return { stdout: '{}' }
     if (argv[1] === 'sessions') return sessions({ fp: 'stopped', groups: ['G1', 'G2'] })
     return new Promise(resolve => (refuse = () => resolve({ exitCode: 1, stderr: 'letmeknow: session process stopped\n' })))

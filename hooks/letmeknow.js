@@ -142,7 +142,8 @@ async function begin($, current) {
 	])
 	if (session !== current) return
 	current.join = join
-	const program = ['npx', '-y', `@letmeknow/cli@${version}`]
+	// npm's notices would lead what letmeknow prints to stderr.
+	const program = ['npx', '-y', '--loglevel=error', `@letmeknow/cli@${version}`]
 	if (!attach) return run($, current, [...program, 'listen'])
 	// One that has a reader already, or does not run, leaves this Claude Code session a new letmeknow session.
 	await run($, current, [...program, '--session', attach, 'attach'], (code, errors) => {
@@ -224,7 +225,7 @@ export function register(on) {
 		const to = await newest($)
 		const from = (await letmeknow($, [current.bin, '--version'])).trim().split(' ')[1]
 		if (from === to) return { text: `${fp} runs ${to}, the newest ${MINOR} release` }
-		const program = ['npx', '-y', `@letmeknow/cli@${to}`]
+		const program = ['npx', '-y', '--loglevel=error', `@letmeknow/cli@${to}`]
 		// npx fetches it while the session runs on.
 		await letmeknow($, [...program, '--version'], { timeoutMs: 600_000 })
 		// A session that stops in no group is deleted, so one in none runs again as a new session.
