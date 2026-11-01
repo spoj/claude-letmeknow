@@ -203,6 +203,46 @@ test('a Claude Code session that ends during a join stops the sibling it runs me
   expect(h.logs).toEqual([])
 })
 
+test('a Claude Code session attaches to the session letmeknow.json names, as its reader, and runs its commands with that session\'s program', async ($, on) => {
+  const h = host(on, { settings: { attach: 'fedcba9876543210' } })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await settle()
+  expect(h.spawns).toEqual([['npx', '-y', '@letmeknow/cli@0.24.0', '--session', 'fedcba9876543210', 'attach']])
+  h.children[0].write('{"type":"ready","fp":"fedcba9876543210","bin":"/detached/letmeknow"}\n')
+  await settle()
+  expect(h.status).toEqual(['fedcba9876543210'])
+  await command($, ['groups'])
+  expect(h.runs.at(-1)?.argv).toEqual(['/detached/letmeknow', '--session', 'fedcba9876543210', 'groups'])
+  // Run again, maybe by a newer program, the session says so in a new `ready`.
+  h.children[0].write('{"type":"ready","fp":"fedcba9876543210","bin":"/detached/newer"}\n')
+  await settle()
+  await command($, ['groups'])
+  expect(h.runs.at(-1)?.argv).toEqual(['/detached/newer', '--session', 'fedcba9876543210', 'groups'])
+  await end($, 'prompt_input_exit')
+  await settle()
+  // Ending the Claude Code session only stops its reading.
+  expect(h.children[0].closed).toBe(true)
+  expect(h.spawns.length).toBe(1)
+  expect(h.logs).toEqual([])
+})
+
+test('a Claude Code session whose session to attach to has a reader already is a new letmeknow session', async ($, on) => {
+  const h = host(on, { settings: { attach: 'fedcba9876543210' } })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await settle()
+  h.children[0].write('letmeknow: session fedcba9876543210 has a reader attached already\n', 'stderr')
+  h.children[0].exit(1)
+  await settle()
+  expect(h.logs).toEqual(['letmeknow: not attached to fedcba9876543210 (letmeknow: session fedcba9876543210 has a reader attached already); this Claude Code session is a new letmeknow session'])
+  expect(h.spawns.at(-1)).toEqual(LISTEN)
+  h.children[1].write(READY)
+  await settle()
+  expect(h.status).toEqual(['0123456789abcdef'])
+  await end($, 'prompt_input_exit')
+  await settle()
+  expect(h.children[1].closed).toBe(true)
+})
+
 test('a session that draws nowhere at its start joins when the Desktop app, VS Code or a phone attaches', async ($, on) => {
   const h = host(on)
   await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })

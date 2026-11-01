@@ -1,11 +1,12 @@
 // Puts a Claude Code session in letmeknow: one in a terminal, and one the Desktop app, VS Code or a phone attaches to,
-// as a new letmeknow session, known by its fingerprint, which joins the groups of ~/.claude/letmeknow.json and goes when
-// the Claude Code session ends in no group. Its `letmeknow listen` runs through npx, as letmeknow's skill has agents run it, but with the newest release of the
-// minor version it speaks by its exact version, which it looks up on npm: npx takes any release it has cached for a
-// range. What it prints reaches Claude as one prompt from this plugin, once none came for a moment; its `ready` names
-// the session's fingerprint and its own program, which runs the commands of Claude's letmeknow tool, once ready. The
-// tool's description tells Claude its session: where an organization manages Claude Code, only the plugins it lists can
-// add to the system prompt.
+// as a new letmeknow session, known by its fingerprint, which joins the groups of ~/.claude/letmeknow.json and goes
+// when the Claude Code session ends in no group; or as the session that file names to attach to, which runs on its own,
+// while it has no other reader. Its `letmeknow listen`, or `attach`, runs through npx, as letmeknow's skill has agents
+// run it, but with the newest release of the minor version it speaks by its exact version, which it looks up on npm:
+// npx takes any release it has cached for a range. What it prints reaches Claude as one prompt from this plugin, once
+// none came for a moment; its `ready` names the session's fingerprint and its own program, which runs the commands of
+// Claude's letmeknow tool, once ready. The tool's description tells Claude its session: where an organization manages
+// Claude Code, only the plugins it lists can add to the system prompt.
 const MINOR = '0.24'
 const TOOL = 'mcp__letmeknow__letmeknow'
 // How long a sibling has to start and make its invite: back from a while away, its invite first catches up, up to about
@@ -46,7 +47,8 @@ async function letmeknow($, argv, init) {
 	return stdout
 }
 
-// The groups each session joins as it starts, by id: `{ "join": ["<group id>"] }`.
+// The groups each session joins as it starts, by id, and the session to attach to rather than start a new one, by
+// fingerprint: `{ "join": ["<group id>"], "attach": "<fp>" }`.
 async function settings($) {
 	const path = `${await $.env.get('HOME')}/.claude/letmeknow.json`
 	return (await $.fs.exists(path)) ? JSON.parse(await $.fs.read(path)) : {}
@@ -126,7 +128,7 @@ async function start($) {
 }
 
 async function begin($, current) {
-	const [version, { join = [] }] = await Promise.all([
+	const [version, { join = [], attach }] = await Promise.all([
 		newest($).catch(error => {
 			$.ui.log(`letmeknow: cannot look up the newest ${MINOR} release (${error.message}); npx runs one it has`)
 			return MINOR
@@ -134,11 +136,18 @@ async function begin($, current) {
 		settings($),
 	])
 	current.join = join
-	await run($, current, ['npx', '-y', `@letmeknow/cli@${version}`, 'listen'])
+	const program = ['npx', '-y', `@letmeknow/cli@${version}`]
+	if (!attach) return run($, current, [...program, 'listen'])
+	// One that has a reader already, or does not run, leaves this Claude Code session a new letmeknow session.
+	await run($, current, [...program, '--session', attach, 'attach'], (code, errors) => {
+		if (current.fp || session !== current) return stopped($, current, code, errors)
+		$.ui.log(`letmeknow: not attached to ${attach} (${errors}); this Claude Code session is a new letmeknow session`)
+		return run($, current, [...program, 'listen'])
+	})
 }
 
-// Runs `argv`, `listen`: what it prints reaches Claude, and its `ready` names the session. Once it stops, `exited` hears
-// its exit code and what it printed to stderr last.
+// Runs `argv`, `listen` or `attach`: what it prints reaches Claude, and its `ready` names the session. Once it stops,
+// `exited` hears its exit code and what it printed to stderr last.
 async function run($, current, argv, exited = (code, errors) => stopped($, current, code, errors)) {
 	// A new session, not the one a LETMEKNOW_SESSION this process holds names, as a Pi's or another Claude Code session's:
 	// `listen` inherits the process's environment, and takes the session it names.
@@ -160,7 +169,8 @@ async function run($, current, argv, exited = (code, errors) => stopped($, curre
 				const event = JSON.parse(line)
 				if (event.type !== 'ready') wake($, line)
 				else {
-					Object.assign(current, { bin: event.bin, fp: event.fp })
+					// An attached session's comes again as it runs again, with the program it runs then.
+					Object.assign(current, { bin: event.bin, fp: event.fp, attached: argv.includes('attach') })
 					await $.env.set('LETMEKNOW_SESSION', event.fp)
 					$.ui.status(event.fp)
 					current.resolve()
@@ -172,7 +182,7 @@ async function run($, current, argv, exited = (code, errors) => stopped($, curre
 	} catch (error) {
 		errors = error.message
 	}
-	exited(code, errors.trim())
+	return exited(code, errors.trim())
 }
 
 function stopped($, current, code, errors) {
