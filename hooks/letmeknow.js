@@ -8,7 +8,7 @@
 // `ready` names the session's fingerprint and its own program, which runs the commands of Claude's letmeknow tool, once
 // ready. The tool's description tells Claude its session: where an organization manages Claude Code, only the plugins
 // it lists can add to the system prompt.
-const MINOR = '0.25'
+const MINOR = '0.26'
 const TOOL = 'mcp__letmeknow__letmeknow'
 // How long a sibling has to start and make its invite: back from a while away, its invite first catches up, up to about
 // two minutes.
